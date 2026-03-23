@@ -11,4 +11,5 @@ __pycache__/
 data/*.db
 data/*.db-*
 data/stock_journal.json
-
+build_static_site.py
+docs/
