@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>股票归档与 TradingView 联动面板</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <section class="panel panel-hero">
+          <div>
+            <p class="eyebrow">Stock Desk</p>
+            <h1>股票归档与联动查看</h1>
+            <p class="hero-copy">
+              左边管理扫描结果、记录和复盘，右边看联动 K 线与 120MA / 250MA。上下键切换股票，自动联动图表，并可一键打开 TradingView。
+            </p>
+          </div>
+          <div class="shortcut-card">
+            <span>快捷键</span>
+            <strong>↑ / ↓</strong>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>归档列表</h2>
+            <button id="refresh-button" class="ghost-button">刷新</button>
+          </div>
+          <select id="scan-select" class="scan-select"></select>
+          <div id="scan-meta" class="scan-meta"></div>
+        </section>
+
+        <section class="panel list-panel">
+          <div class="panel-header">
+            <h2>股票清单</h2>
+            <span id="selection-hint" class="muted-text">未选择</span>
+          </div>
+          <div class="list-toolbar">
+            <input id="search-input" type="search" placeholder="搜索代码或交易所" />
+            <span id="list-count" class="pill">0</span>
+          </div>
+          <div id="stock-list" class="stock-list" tabindex="0"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header">
+            <h2>记录与备注</h2>
+            <span id="note-saved-at" class="muted-text"></span>
+          </div>
+          <label class="field-label" for="status-select">状态</label>
+          <select id="status-select" class="scan-select"></select>
+          <label class="field-label" for="note-textarea">备注</label>
+          <textarea
+            id="note-textarea"
+            class="notes-textarea"
+            placeholder="记录你的观察、计划价位、财报关注点、止损位等"
+          ></textarea>
+          <button id="save-note-button" class="primary-button">保存记录</button>
+        </section>
+      </aside>
+
+      <main class="main-pane">
+        <section class="panel summary-panel">
+          <div class="summary-grid">
+            <div>
+              <p class="eyebrow">当前股票</p>
+              <h2 id="selected-symbol">--</h2>
+              <p id="selected-name" class="muted-text">请先选择一只股票</p>
+            </div>
+            <div class="metric-grid">
+              <div class="metric-card">
+                <span>突破日期</span>
+                <strong id="metric-breakout-date">--</strong>
+              </div>
+              <div class="metric-card">
+                <span>距今交易日</span>
+                <strong id="metric-days">--</strong>
+              </div>
+              <div class="metric-card">
+                <span>最新价</span>
+                <strong id="metric-close">--</strong>
+              </div>
+              <div class="metric-card">
+                <span>高于250日线</span>
+                <strong id="metric-premium">--</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="chart-history-grid">
+          <section class="panel chart-panel">
+            <div class="panel-header">
+              <h2>联动 K 线</h2>
+              <div class="chart-actions">
+                <span class="muted-text">默认带 120MA / 250MA，可缩放、拖拽，右侧一键打开 TradingView</span>
+                <a id="tv-open-link" class="ghost-link" href="#" target="_blank" rel="noreferrer">在 TradingView 打开</a>
+              </div>
+            </div>
+            <div id="tv-chart-host" class="tv-chart-host"></div>
+          </section>
+
+          <section class="panel history-panel">
+            <div class="panel-header">
+              <h2>历史变化记录</h2>
+              <span class="muted-text">按归档结果回看</span>
+            </div>
+            <div id="history-list" class="history-list"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+  </html>

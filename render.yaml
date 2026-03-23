@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: stock-tracker
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: "10000"
+      - key: STOCK_TRACKER_DATA_DIR
+        value: /data
+      - key: STOCK_TRACKER_DB_PATH
+        value: /data/stock_tracker.db
+      - key: STOCK_TRACKER_OUTPUT_DIR
+        value: /app/output
+      - key: STOCK_TRACKER_CACHE_DIR
+        value: /tmp/stock-cache
+      - key: STOCK_TRACKER_BASIC_AUTH_USER
+        sync: false
+      - key: STOCK_TRACKER_BASIC_AUTH_PASSWORD
+        sync: false
+    disk:
+      name: stock-tracker-data
+      mountPath: /data
+      sizeGB: 1
+

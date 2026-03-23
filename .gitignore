@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+.env
+.venv/
+.pytest_cache/
+
+.cache/
+data/*.db
+data/*.db-*
+data/stock_journal.json
+
