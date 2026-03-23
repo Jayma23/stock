@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
+import io
 import json
 import os
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from functools import partial
 from html import escape
 from http import HTTPStatus
@@ -14,8 +16,14 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 import pandas as pd
+
+try:
+    import yfinance as yf
+except ImportError:  # pragma: no cover - optional dependency at runtime
+    yf = None
 
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = Path(os.environ.get("STOCK_TRACKER_OUTPUT_DIR", BASE_DIR / "output")).resolve()
@@ -32,6 +40,8 @@ STATUS_OPTIONS = ["观察", "研究中", "候选", "已排除", "已持有"]
 SCAN_FILE_PATTERN = re.compile(
     r"^breakouts_\d{4}-\d{2}-\d{2}(?:_3day)?(?:_strict_common)?\.csv$"
 )
+MARKET_TIMEZONE = ZoneInfo("America/New_York")
+MARKET_CLOSE_TIME = dt_time(16, 0)
 
 
 def ensure_journal_file() -> None:
@@ -259,7 +269,99 @@ def load_price_frame(symbol: str) -> pd.DataFrame | None:
         if not normalized.empty:
             return normalized
 
+    downloaded = download_price_frame(symbol)
+    if downloaded is None or downloaded.empty:
+        return None
+
+    cache_path = CACHE_DIR / "prices" / "yfinance" / cache_name
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    downloaded.to_csv(cache_path, index=False)
+    return downloaded
+
     return None
+
+
+def normalize_yfinance_symbol(symbol: str) -> str:
+    return symbol.strip().upper().replace(".", "-").replace("/", "-")
+
+
+def drop_incomplete_current_day_bar(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty or "Date" not in frame.columns:
+        return frame
+
+    now_ny = datetime.now(MARKET_TIMEZONE)
+    if now_ny.time() >= MARKET_CLOSE_TIME:
+        return frame
+
+    normalized = frame.copy()
+    normalized["Date"] = pd.to_datetime(normalized["Date"], errors="coerce")
+    normalized = normalized.dropna(subset=["Date"]).reset_index(drop=True)
+    if normalized.empty:
+        return normalized
+
+    latest_date = pd.Timestamp(normalized["Date"].iloc[-1]).date()
+    if latest_date < now_ny.date():
+        return normalized
+
+    return normalized.loc[normalized["Date"].dt.date < now_ny.date()].reset_index(drop=True)
+
+
+def normalize_downloaded_price_frame(downloaded: pd.DataFrame, yahoo_symbol: str) -> pd.DataFrame | None:
+    if downloaded.empty:
+        return None
+
+    if isinstance(downloaded.columns, pd.MultiIndex):
+        available_symbols = set(downloaded.columns.get_level_values("Ticker"))
+        if yahoo_symbol not in available_symbols:
+            return None
+        frame = downloaded.xs(yahoo_symbol, axis=1, level="Ticker").copy()
+    else:
+        frame = downloaded.copy()
+
+    if "Close" not in frame.columns:
+        return None
+
+    frame = frame.reset_index()
+    if "Date" not in frame.columns:
+        return None
+
+    frame["Date"] = pd.to_datetime(frame["Date"], errors="coerce")
+    numeric_columns = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
+    for column in numeric_columns:
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    for column in ("Open", "High", "Low"):
+        if column not in frame.columns:
+            frame[column] = frame["Close"]
+    if "Volume" not in frame.columns:
+        frame["Volume"] = 0
+
+    frame = frame.dropna(subset=["Date", "Open", "High", "Low", "Close"])
+    frame = frame.drop_duplicates(subset=["Date"]).sort_values("Date").reset_index(drop=True)
+    frame = drop_incomplete_current_day_bar(frame)
+    return frame if not frame.empty else None
+
+
+def download_price_frame(symbol: str) -> pd.DataFrame | None:
+    if yf is None:
+        return None
+
+    yahoo_symbol = normalize_yfinance_symbol(symbol)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            downloaded = yf.download(
+                yahoo_symbol,
+                period="3y",
+                interval="1d",
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+            )
+    except Exception:
+        return None
+
+    return normalize_downloaded_price_frame(downloaded, yahoo_symbol)
 
 
 def build_price_payload(symbol: str, bars: int = 420) -> dict[str, Any] | None:
@@ -676,7 +778,7 @@ def build_chart_page(symbol: str, scan_file: str | None) -> str:
         }})
         .catch((error) => {{
           statusText.textContent = error.message;
-          chartHost.innerHTML = '<div style="padding:24px;color:#64748b">这只股票暂时没有可用的K线缓存数据。</div>';
+          chartHost.innerHTML = '<div style="padding:24px;color:#64748b">这只股票暂时没有可用的 K 线数据。</div>';
         }});
     </script>
   </body>
@@ -775,7 +877,7 @@ class StockTrackerHandler(SimpleHTTPRequestHandler):
                 return
             payload = build_price_payload(str(symbol).strip().upper())
             if payload is None:
-                self.send_json({"error": "没有找到价格缓存"}, HTTPStatus.NOT_FOUND)
+                self.send_json({"error": "暂时没有可用的价格数据"}, HTTPStatus.NOT_FOUND)
                 return
             self.send_json(payload)
             return
