@@ -354,15 +354,55 @@ body {
 
 @media (max-width: 1180px) {
   .app-shell {
-    grid-template-columns: 1fr;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar,
+  .main-pane {
+    display: contents;
+  }
+
+  .panel-hero {
+    order: 1;
+  }
+
+  .archive-panel {
+    order: 2;
+  }
+
+  .list-panel {
+    order: 3;
+  }
+
+  .chart-panel {
+    order: 4;
+  }
+
+  .summary-panel {
+    order: 5;
+  }
+
+  .history-panel {
+    order: 6;
+  }
+
+  .notes-panel {
+    order: 7;
   }
 
   .chart-history-grid,
   .summary-grid {
+    display: grid;
     grid-template-columns: 1fr;
   }
 
   .tv-chart-host {
     min-height: 420px;
+  }
+
+  .chart-actions {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
