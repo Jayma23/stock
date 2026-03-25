@@ -2,6 +2,8 @@ const state = {
   scans: [],
   currentScan: null,
   currentRows: [],
+  currentNewRows: [],
+  previousScanLabel: null,
   filteredRows: [],
   selectedIndex: -1,
   statusOptions: [],
@@ -14,6 +16,9 @@ const elements = {
   stockList: document.querySelector("#stock-list"),
   listCount: document.querySelector("#list-count"),
   searchInput: document.querySelector("#search-input"),
+  newcomerMeta: document.querySelector("#newcomer-meta"),
+  newcomerCount: document.querySelector("#newcomer-count"),
+  newcomerList: document.querySelector("#newcomer-list"),
   selectionHint: document.querySelector("#selection-hint"),
   selectedSymbol: document.querySelector("#selected-symbol"),
   selectedName: document.querySelector("#selected-name"),
@@ -90,9 +95,12 @@ async function loadScan(file) {
   const payload = await fetchJson(`/api/scan?file=${encodeURIComponent(file)}`);
   state.currentScan = payload.file;
   state.currentRows = payload.rows;
+  state.currentNewRows = payload.newcomers ?? [];
+  state.previousScanLabel = payload.previous_label ?? null;
   state.filteredRows = [...payload.rows];
   state.selectedIndex = state.filteredRows.length ? 0 : -1;
   elements.scanMeta.textContent = `${payload.label}，共 ${payload.count} 只。`;
+  renderNewcomers();
   applyFilter();
 }
 
@@ -148,6 +156,48 @@ function renderList() {
     `;
     item.addEventListener("click", () => selectIndex(index));
     elements.stockList.appendChild(item);
+  });
+}
+
+function renderNewcomers() {
+  elements.newcomerList.innerHTML = "";
+  elements.newcomerCount.textContent = String(state.currentNewRows.length);
+
+  if (!state.currentRows.length) {
+    elements.newcomerMeta.textContent = "当前归档还没有股票数据。";
+    elements.newcomerList.innerHTML = '<div class="empty-state">暂无新晋股票。</div>';
+    return;
+  }
+
+  if (!state.previousScanLabel) {
+    elements.newcomerMeta.textContent = "这是目前最早的一期归档，暂时没有可对比的上一期。";
+    elements.newcomerList.innerHTML = '<div class="empty-state">暂无可比较的新晋股票。</div>';
+    return;
+  }
+
+  elements.newcomerMeta.textContent = `相对上一期 ${state.previousScanLabel} 新进入本期名单。`;
+
+  if (!state.currentNewRows.length) {
+    elements.newcomerList.innerHTML = '<div class="empty-state">这一期没有新增进入名单的股票。</div>';
+    return;
+  }
+
+  state.currentNewRows.forEach((row) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "newcomer-item";
+    item.innerHTML = `
+      <div class="stock-item-top">
+        <strong>${row.symbol}</strong>
+        <span class="pill new-pill">新晋</span>
+      </div>
+      <div class="stock-item-bottom">
+        <span>${row.exchange}</span>
+        <span>${formatNumber(row.latest_premium_pct)}%</span>
+      </div>
+    `;
+    item.addEventListener("click", () => selectSymbol(row.symbol));
+    elements.newcomerList.appendChild(item);
   });
 }
 
@@ -230,6 +280,24 @@ function selectIndex(index) {
   renderSelection();
   const selected = elements.stockList.children[index];
   selected?.scrollIntoView({ block: "nearest" });
+}
+
+function selectSymbol(symbol) {
+  const index = state.filteredRows.findIndex((row) => row.symbol === symbol);
+  if (index >= 0) {
+    selectIndex(index);
+    return;
+  }
+
+  const fallbackIndex = state.currentRows.findIndex((row) => row.symbol === symbol);
+  if (fallbackIndex >= 0) {
+    elements.searchInput.value = "";
+    applyFilter();
+    const nextIndex = state.filteredRows.findIndex((row) => row.symbol === symbol);
+    if (nextIndex >= 0) {
+      selectIndex(nextIndex);
+    }
+  }
 }
 
 function handleArrowKey(event) {

@@ -193,11 +193,25 @@ def dataframe_to_rows(frame: pd.DataFrame) -> list[dict[str, Any]]:
 def load_scan(path: Path) -> dict[str, Any]:
     frame = pd.read_csv(path)
     rows = dataframe_to_rows(frame)
+    previous_scan_path = previous_scan_file(path)
+    previous_label = scan_label(previous_scan_path) if previous_scan_path is not None else None
+    previous_symbols: set[str] = set()
+    if previous_scan_path is not None:
+        previous_frame = pd.read_csv(previous_scan_path)
+        previous_symbols = {
+            str(symbol).strip().upper()
+            for symbol in previous_frame.get("symbol", pd.Series(dtype=str)).tolist()
+            if str(symbol).strip()
+        }
+    newcomers = [row for row in rows if str(row["symbol"]).strip().upper() not in previous_symbols]
     return {
         "file": path.name,
         "label": scan_label(path),
         "count": len(rows),
         "rows": rows,
+        "newcomer_count": len(newcomers),
+        "newcomers": newcomers,
+        "previous_label": previous_label,
     }
 
 
@@ -214,6 +228,14 @@ def list_scans() -> list[dict[str, Any]]:
             }
         )
     return scans
+
+
+def previous_scan_file(current_path: Path) -> Path | None:
+    scans = list_scan_files()
+    for index, path in enumerate(scans):
+        if path.resolve() == current_path.resolve():
+            return scans[index + 1] if index + 1 < len(scans) else None
+    return None
 
 
 def get_symbol_history(symbol: str) -> list[dict[str, Any]]:

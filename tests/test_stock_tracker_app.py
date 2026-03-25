@@ -61,5 +61,67 @@ class PriceLoadingTests(unittest.TestCase):
         self.assertTrue(cache_file_exists)
 
 
+class NewcomerBasketTests(unittest.TestCase):
+    def test_load_scan_includes_newcomers_relative_to_previous_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            previous = output_dir / "breakouts_2026-03-23_3day_strict_common.csv"
+            current = output_dir / "breakouts_2026-03-24_3day_strict_common.csv"
+
+            pd.DataFrame(
+                [
+                    {
+                        "symbol": "AAPL",
+                        "name": "Apple Inc.",
+                        "exchange": "NASDAQ",
+                        "breakout_date": "2026-03-23",
+                        "sessions_since_breakout": 0,
+                        "latest_close": 200.0,
+                        "latest_ma250": 199.0,
+                        "latest_premium_pct": 0.5,
+                        "signal_type": "today",
+                    }
+                ]
+            ).to_csv(previous, index=False)
+
+            pd.DataFrame(
+                [
+                    {
+                        "symbol": "AAPL",
+                        "name": "Apple Inc.",
+                        "exchange": "NASDAQ",
+                        "breakout_date": "2026-03-24",
+                        "sessions_since_breakout": 0,
+                        "latest_close": 201.0,
+                        "latest_ma250": 199.5,
+                        "latest_premium_pct": 0.75,
+                        "signal_type": "today",
+                    },
+                    {
+                        "symbol": "MSFT",
+                        "name": "Microsoft Corp.",
+                        "exchange": "NASDAQ",
+                        "breakout_date": "2026-03-24",
+                        "sessions_since_breakout": 0,
+                        "latest_close": 410.0,
+                        "latest_ma250": 409.0,
+                        "latest_premium_pct": 0.24,
+                        "signal_type": "today",
+                    },
+                ]
+            ).to_csv(current, index=False)
+
+            original_output_dir = stock_tracker_app.OUTPUT_DIR
+            try:
+                stock_tracker_app.OUTPUT_DIR = output_dir
+                payload = stock_tracker_app.load_scan(current)
+            finally:
+                stock_tracker_app.OUTPUT_DIR = original_output_dir
+
+        self.assertEqual(payload["previous_label"], "2026-03-23 / 3天内 / 严格普通股")
+        self.assertEqual(payload["newcomer_count"], 1)
+        self.assertEqual([row["symbol"] for row in payload["newcomers"]], ["MSFT"])
+
+
 if __name__ == "__main__":
     unittest.main()
