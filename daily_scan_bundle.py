@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import io
 import re
+import subprocess
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -29,6 +31,7 @@ class ScanDescriptor:
     run_date: date
     lookback_days: int
     strict_common_stock: bool
+    source_ref: str | None = None
 
 
 def parse_primary_scan(path: Path) -> ScanDescriptor | None:
@@ -50,7 +53,7 @@ def find_previous_scan(current_scan: Path, output_dir: Path) -> ScanDescriptor |
     if current_descriptor is None:
         raise ValueError(f"Unsupported scan filename: {current_scan.name}")
 
-    candidates: list[ScanDescriptor] = []
+    candidates: dict[tuple[date, int, bool], ScanDescriptor] = {}
     for path in output_dir.glob("breakouts_*.csv"):
         descriptor = parse_primary_scan(path)
         if descriptor is None:
@@ -63,11 +66,110 @@ def find_previous_scan(current_scan: Path, output_dir: Path) -> ScanDescriptor |
             continue
         if descriptor.run_date >= current_descriptor.run_date:
             continue
-        candidates.append(descriptor)
+        candidates[(descriptor.run_date, descriptor.lookback_days, descriptor.strict_common_stock)] = descriptor
+
+    for descriptor in find_previous_scans_in_git_history(current_descriptor):
+        key = (descriptor.run_date, descriptor.lookback_days, descriptor.strict_common_stock)
+        candidates.setdefault(key, descriptor)
 
     if not candidates:
         return None
-    return max(candidates, key=lambda item: item.run_date)
+    return max(candidates.values(), key=lambda item: item.run_date)
+
+
+def repo_root() -> Path | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+    root = result.stdout.strip()
+    return Path(root) if root else None
+
+
+def discover_git_refs() -> list[str]:
+    refs: list[str] = []
+    for candidate in ("origin/main", "main", "HEAD"):
+        try:
+            subprocess.run(
+                ["git", "rev-parse", "--verify", "--quiet", candidate],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+        refs.append(candidate)
+    return refs
+
+
+def find_previous_scans_in_git_history(current_descriptor: ScanDescriptor) -> list[ScanDescriptor]:
+    root = repo_root()
+    if root is None:
+        return []
+
+    current_path = current_descriptor.path.resolve()
+    try:
+        output_relative = current_path.parent.relative_to(root).as_posix()
+    except ValueError:
+        return []
+
+    candidates: dict[tuple[date, int, bool], ScanDescriptor] = {}
+    for ref in discover_git_refs():
+        try:
+            result = subprocess.run(
+                ["git", "ls-tree", "-r", "--name-only", ref, "--", output_relative],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+
+        for repo_relative in result.stdout.splitlines():
+            descriptor = parse_primary_scan(Path(repo_relative))
+            if descriptor is None:
+                continue
+            if descriptor.lookback_days != current_descriptor.lookback_days:
+                continue
+            if descriptor.strict_common_stock != current_descriptor.strict_common_stock:
+                continue
+            if descriptor.run_date >= current_descriptor.run_date:
+                continue
+            key = (descriptor.run_date, descriptor.lookback_days, descriptor.strict_common_stock)
+            candidates.setdefault(
+                key,
+                ScanDescriptor(
+                    path=root / repo_relative,
+                    run_date=descriptor.run_date,
+                    lookback_days=descriptor.lookback_days,
+                    strict_common_stock=descriptor.strict_common_stock,
+                    source_ref=ref,
+                ),
+            )
+    return list(candidates.values())
+
+
+def read_scan_frame(descriptor: ScanDescriptor) -> pd.DataFrame:
+    if descriptor.source_ref is None:
+        return pd.read_csv(descriptor.path)
+
+    root = repo_root()
+    if root is None:
+        raise RuntimeError("Unable to resolve repository root for git-backed scan")
+
+    repo_relative = descriptor.path.relative_to(root).as_posix()
+    result = subprocess.run(
+        ["git", "show", f"{descriptor.source_ref}:{repo_relative}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return pd.read_csv(io.StringIO(result.stdout))
 
 
 def exchange_prefix(exchange: str) -> str:
@@ -262,7 +364,7 @@ def generate_bundle_for_scan(current_scan: Path, output_dir: Path) -> dict[str, 
     previous_frame = pd.DataFrame()
     previous_date: str | None = None
     if previous_descriptor is not None:
-        previous_frame = pd.read_csv(previous_descriptor.path)
+        previous_frame = read_scan_frame(previous_descriptor)
         previous_date = previous_descriptor.run_date.isoformat()
 
     current_symbols = rows_by_symbols(current_frame)

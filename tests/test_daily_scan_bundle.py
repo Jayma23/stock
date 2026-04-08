@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -78,6 +80,61 @@ class BundleGenerationTests(unittest.TestCase):
 
             self.assertIsNotNone(previous)
             self.assertEqual(previous.path.name, "breakouts_2026-03-27_3day_strict_common.csv")
+
+    def test_generate_bundle_falls_back_to_git_history_for_previous_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            repo_dir = Path(tmp_dir)
+            subprocess.run(["git", "init", "-b", "main"], check=True, cwd=repo_dir)
+            subprocess.run(["git", "config", "user.name", "Test User"], check=True, cwd=repo_dir)
+            subprocess.run(["git", "config", "user.email", "test@example.com"], check=True, cwd=repo_dir)
+
+            output_dir = repo_dir / "output"
+            output_dir.mkdir()
+            base_file = repo_dir / "README.md"
+            base_file.write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "add", "README.md"], check=True, cwd=repo_dir)
+            subprocess.run(["git", "commit", "-m", "base"], check=True, cwd=repo_dir)
+            base_commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                check=True,
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            previous = output_dir / "breakouts_2026-04-06_3day_strict_common.csv"
+            pd.DataFrame(
+                [
+                    sample_row("AAPL", "2026-04-06", 0, "NASDAQ"),
+                    sample_row("MSFT", "2026-04-06", 0, "NYSE"),
+                ]
+            ).to_csv(previous, index=False)
+            subprocess.run(["git", "add", str(previous.relative_to(repo_dir))], check=True, cwd=repo_dir)
+            subprocess.run(["git", "commit", "-m", "add previous scan"], check=True, cwd=repo_dir)
+
+            subprocess.run(["git", "checkout", "--detach", base_commit], check=True, cwd=repo_dir)
+            output_dir.mkdir()
+
+            current = output_dir / "breakouts_2026-04-07_3day_strict_common.csv"
+            pd.DataFrame(
+                [
+                    sample_row("AAPL", "2026-04-07", 0, "NASDAQ"),
+                    sample_row("NVDA", "2026-04-07", 0, "NYSE American"),
+                ]
+            ).to_csv(current, index=False)
+
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(repo_dir)
+                summary = daily_scan_bundle.generate_bundle_for_scan(current, output_dir)
+            finally:
+                os.chdir(previous_cwd)
+
+            added_csv = output_dir / "breakouts_2026-04-07_added_vs_2026-04-06.csv"
+            self.assertEqual(summary["added_count"], 1)
+            self.assertEqual(summary["removed_count"], 1)
+            self.assertTrue(added_csv.exists())
+            self.assertEqual(pd.read_csv(added_csv)["symbol"].tolist(), ["NVDA"])
 
 
 if __name__ == "__main__":
