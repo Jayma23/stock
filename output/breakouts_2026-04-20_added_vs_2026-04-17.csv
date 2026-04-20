@@ -1,0 +1,2 @@
+symbol,name,exchange,breakout_date,breakout_close,breakout_ma250,breakout_premium_pct,latest_date,latest_close,latest_ma250,latest_premium_pct,sessions_since_breakout,signal_type
+BHR,Braemar Hotels & Resorts Inc. Common Stock,NYSE,2026-04-17,2.569999933242798,2.567400002479553,0.1012670702163154,2026-04-17,2.569999933242798,2.567400002479553,0.1012670702163154,0,today
