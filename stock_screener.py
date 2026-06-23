@@ -5,13 +5,14 @@ import concurrent.futures
 import contextlib
 import csv
 import io
+import subprocess
 import sys
 import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, time as dt_time
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -37,6 +38,21 @@ DEFAULT_PROVIDER = "yfinance"
 DEFAULT_YFINANCE_BATCH_SIZE = 100
 MARKET_TIMEZONE = ZoneInfo("America/New_York")
 MARKET_CLOSE_TIME = dt_time(16, 0)
+RESULT_COLUMNS = [
+    "symbol",
+    "name",
+    "exchange",
+    "breakout_date",
+    "breakout_close",
+    "breakout_ma250",
+    "breakout_premium_pct",
+    "latest_date",
+    "latest_close",
+    "latest_ma250",
+    "latest_premium_pct",
+    "sessions_since_breakout",
+    "signal_type",
+]
 
 EXCHANGE_MAP = {
     "A": "NYSE American",
@@ -178,6 +194,50 @@ def cache_is_fresh(path: Path, max_age_hours: int) -> bool:
     return age_seconds < max_age_hours * 3600
 
 
+def read_valid_cache(
+    cache_path: Path,
+    *,
+    validator: Callable[[str], bool] | None,
+) -> Optional[str]:
+    if not cache_path.exists():
+        return None
+    cached_text = cache_path.read_text(encoding="utf-8")
+    if validator is not None and not validator(cached_text):
+        return None
+    return cached_text
+
+
+def fetch_text_with_curl(url: str, *, timeout: int) -> str:
+    result = subprocess.run(
+        [
+            "curl",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--max-time",
+            str(timeout),
+            url,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
+def has_pipe_header(expected_header: str) -> Callable[[str], bool]:
+    def validator(raw_text: str) -> bool:
+        for line in raw_text.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            return stripped.startswith(expected_header)
+        return False
+
+    return validator
+
+
 def fetch_text(
     url: str,
     cache_path: Path,
@@ -186,22 +246,41 @@ def fetch_text(
     max_age_hours: int,
     timeout: int = 20,
     session: Optional[requests.Session] = None,
+    validator: Callable[[str], bool] | None = None,
+    validation_label: str | None = None,
 ) -> str:
     if not refresh and cache_is_fresh(cache_path, max_age_hours):
-        return cache_path.read_text(encoding="utf-8")
+        cached_text = read_valid_cache(cache_path, validator=validator)
+        if cached_text is not None:
+            return cached_text
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     current_session = session or build_session()
+    errors: list[str] = []
     try:
         response = current_session.get(url, timeout=timeout)
         response.raise_for_status()
-    except requests.RequestException:
-        if cache_path.exists():
-            return cache_path.read_text(encoding="utf-8")
-        raise
+        response_text = response.text
+        if validator is not None and not validator(response_text):
+            raise ValueError(validation_label or f"Unexpected response payload from {url}")
+        cache_path.write_text(response_text, encoding="utf-8")
+        return response_text
+    except (requests.RequestException, ValueError) as exc:
+        errors.append(str(exc))
 
-    cache_path.write_text(response.text, encoding="utf-8")
-    return response.text
+    try:
+        response_text = fetch_text_with_curl(url, timeout=timeout)
+        if validator is not None and not validator(response_text):
+            raise ValueError(validation_label or f"Unexpected response payload from {url}")
+        cache_path.write_text(response_text, encoding="utf-8")
+        return response_text
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as exc:
+        errors.append(str(exc))
+
+    cached_text = read_valid_cache(cache_path, validator=validator)
+    if cached_text is not None:
+        return cached_text
+    raise RuntimeError("; ".join(errors))
 
 
 def parse_pipe_file(raw_text: str) -> list[dict[str, str]]:
@@ -262,6 +341,8 @@ def fetch_universe(
         refresh=refresh,
         max_age_hours=max_age_hours,
         session=session,
+        validator=has_pipe_header("Symbol|Security Name|"),
+        validation_label="Nasdaq listed universe response was not a valid pipe-delimited symbol directory",
     )
     other_raw = fetch_text(
         OTHER_LISTED_URL,
@@ -269,6 +350,8 @@ def fetch_universe(
         refresh=refresh,
         max_age_hours=max_age_hours,
         session=session,
+        validator=has_pipe_header("ACT Symbol|Security Name|"),
+        validation_label="Other listed universe response was not a valid pipe-delimited symbol directory",
     )
 
     seen: set[str] = set()
@@ -756,7 +839,7 @@ def screen_universe(
 def format_results(results: list[BreakoutResult]) -> pd.DataFrame:
     frame = pd.DataFrame(asdict(item) for item in results)
     if frame.empty:
-        return frame
+        return pd.DataFrame(columns=RESULT_COLUMNS)
     return frame.sort_values(
         by=["sessions_since_breakout", "latest_premium_pct", "symbol"],
         ascending=[True, True, True],

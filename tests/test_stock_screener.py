@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import unittest
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -9,6 +12,8 @@ import pandas as pd
 from stock_screener import (
     detect_breakout,
     drop_incomplete_current_day_bar,
+    fetch_text,
+    format_results,
     looks_like_common_equity,
     looks_like_common_symbol,
     normalize_stooq_symbol,
@@ -90,6 +95,39 @@ class SymbolFormattingTests(unittest.TestCase):
         self.assertTrue(looks_like_common_symbol("BRK.B"))
         self.assertFalse(looks_like_common_symbol("AMH$G"))
         self.assertFalse(looks_like_common_symbol("AIIA-U"))
+
+
+class FetchResilienceTests(unittest.TestCase):
+    def test_fetch_text_falls_back_to_curl_when_requests_returns_invalid_html(self) -> None:
+        invalid_response = Mock()
+        invalid_response.raise_for_status.return_value = None
+        invalid_response.text = "<html>blocked</html>"
+        session = Mock()
+        session.get.return_value = invalid_response
+
+        with TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir) / "nasdaqlisted.txt"
+            with patch("stock_screener.fetch_text_with_curl", return_value="Symbol|Security Name|\nAAPL|Apple Inc. Common Stock|\n") as curl_fetch:
+                result = fetch_text(
+                    "https://example.com/nasdaqlisted.txt",
+                    cache_path,
+                    refresh=True,
+                    max_age_hours=20,
+                    session=session,
+                    validator=lambda text: text.startswith("Symbol|Security Name|"),
+                    validation_label="invalid directory",
+                )
+                cached_text = cache_path.read_text(encoding="utf-8")
+
+        self.assertIn("AAPL|Apple", result)
+        self.assertEqual(cached_text, result)
+        curl_fetch.assert_called_once()
+
+    def test_format_results_preserves_headers_for_empty_runs(self) -> None:
+        frame = format_results([])
+        self.assertFalse(frame.columns.empty)
+        self.assertEqual(frame.shape[0], 0)
+        self.assertIn("symbol", frame.columns.tolist())
 
 
 class DailyCloseGuardTests(unittest.TestCase):
