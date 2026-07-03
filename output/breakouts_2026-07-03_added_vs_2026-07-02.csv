@@ -1,0 +1,3 @@
+symbol,name,exchange,breakout_date,breakout_close,breakout_ma250,breakout_premium_pct,latest_date,latest_close,latest_ma250,latest_premium_pct,sessions_since_breakout,signal_type
+DB,Deutsche Bank AG Common Stock,NYSE,2026-07-02,35.86000061035156,34.52655989074707,3.8620723403197887,2026-07-02,35.86000061035156,34.52655989074707,3.8620723403197887,0,today
+EMPG,Empro Group Inc. - Ordinary shares,NASDAQ,2026-06-30,17.360000610351562,14.984972437858582,15.849399672518729,2026-07-02,17.360000610351562,15.09081244277954,15.03688536436456,2,recent_week
