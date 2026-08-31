@@ -156,7 +156,10 @@ def find_previous_scans_in_git_history(current_descriptor: ScanDescriptor) -> li
 
 def read_scan_frame(descriptor: ScanDescriptor) -> pd.DataFrame:
     if descriptor.source_ref is None:
-        return pd.read_csv(descriptor.path)
+        try:
+            return pd.read_csv(descriptor.path)
+        except pd.errors.EmptyDataError:
+            return pd.DataFrame()
 
     root = repo_root()
     if root is None:
@@ -169,7 +172,10 @@ def read_scan_frame(descriptor: ScanDescriptor) -> pd.DataFrame:
         capture_output=True,
         text=True,
     )
-    return pd.read_csv(io.StringIO(result.stdout))
+    try:
+        return pd.read_csv(io.StringIO(result.stdout))
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame()
 
 
 def exchange_prefix(exchange: str) -> str:
@@ -346,7 +352,10 @@ def generate_bundle_for_scan(current_scan: Path, output_dir: Path) -> dict[str, 
     if descriptor is None:
         raise ValueError(f"Unsupported scan filename: {current_scan.name}")
 
-    current_frame = pd.read_csv(current_scan)
+    try:
+        current_frame = pd.read_csv(current_scan)
+    except pd.errors.EmptyDataError:
+        current_frame = pd.DataFrame()
     if not current_frame.empty:
         current_frame = current_frame.sort_values(
             by=["sessions_since_breakout", "latest_premium_pct", "symbol"],
