@@ -1,0 +1,3 @@
+symbol,name,exchange,breakout_date,breakout_close,breakout_ma250,breakout_premium_pct,latest_date,latest_close,latest_ma250,latest_premium_pct,sessions_since_breakout,signal_type
+VLOS,Velos Acquisition I Corp. - Class A Ordinary shares,NASDAQ,2026-11-23,10.760000228881836,10.740832015991211,0.17846115517017314,2026-11-23,10.760000228881836,10.740832015991211,0.17846115517017314,0,today
+CET,Central Securities Corporation Common Stock,NYSE American,2026-11-23,53.345001220703125,52.97206002807617,0.7040337725761292,2026-11-23,53.345001220703125,52.97206002807617,0.7040337725761292,0,today
